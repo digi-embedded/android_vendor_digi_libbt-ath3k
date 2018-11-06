@@ -16,11 +16,11 @@
 
 LOCAL_PATH := $(call my-dir)
 
-ifneq ($(BOARD_USE_AR3K_BLUETOOTH) || $(BOARD_USE_AR3K_DIGI_BLUETOOTH),)
+ifeq ($(BOARD_HAVE_BLUETOOTH_AR3K),true)
 
 include $(CLEAR_VARS)
 
-BDROID_DIR:= external/bluetooth/bluedroid
+BDROID_DIR:= system/bt
 
 LOCAL_SRC_FILES := \
         src/bt_vendor_QCA3002.c \
@@ -33,16 +33,17 @@ LOCAL_C_INCLUDES += \
         $(BDROID_DIR)/hci/include
 
 LOCAL_SHARED_LIBRARIES := \
-        libcutils
+        libcutils \
+        liblog
 
 LOCAL_MODULE := libbt-vendor
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := SHARED_LIBRARIES
 LOCAL_MODULE_OWNER := qcom
-LOCAL_MODULE_PATH := $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)
+LOCAL_VENDOR_MODULE := true
 
 include $(LOCAL_PATH)/vnd_buildcfg.mk
 
 include $(BUILD_SHARED_LIBRARY)
 
-endif # BOARD_HAVE_BLUETOOTH_QCOM_AR3002
+endif # BOARD_HAVE_BLUETOOTH_AR3K

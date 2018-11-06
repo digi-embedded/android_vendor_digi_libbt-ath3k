@@ -40,8 +40,9 @@
 #include <stdlib.h>
 #include <termios.h>
 
+#include <bt_hci_bdroid.h>
+
 #include "hci.h"
-#include "bt_hci_bdroid.h"
 #include "bt_vendor_QCA3002.h"
 
 #define MAX_CNT_RETRY 100
