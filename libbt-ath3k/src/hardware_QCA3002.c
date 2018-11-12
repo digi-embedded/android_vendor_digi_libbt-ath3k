@@ -457,17 +457,25 @@ static int write_ps_cmd(int fd, uint8_t opcode, uint32_t ps_param)
 
 
 
-#define PS_ASIC_FILE			"PS_ASIC.pst"
+#define PS_ASIC_CLASS_1_FILE	"PS_ASIC_class_1.pst"
+#define PS_ASIC_CLASS_2_FILE	"PS_ASIC_class_2.pst"
 #define PS_FPGA_FILE			"PS_FPGA.pst"
 #define MAXPATHLEN			4096
-static void get_ps_file_name(uint32_t devtype, uint32_t rom_version,char *path)
+static void get_ps_file_name(uint32_t devtype, uint32_t rom_version, char *path)
 {
     char *filename;
 
-    if (devtype == 0xdeadc0de)
-        filename = PS_ASIC_FILE;
-    else
+    if (devtype == 0xdeadc0de) {
+        /* Get HWID cert from property (use USA default value if unable to read) */
+        int32_t cert = property_get_int32("ro.boot.hwid-cert", 0);
+        if (cert == 0x02)
+            filename = PS_ASIC_CLASS_2_FILE;
+        else
+            filename = PS_ASIC_CLASS_1_FILE;
+    } else {
         filename = PS_FPGA_FILE;
+    }
+    ALOGI("using %s firmware file\n", filename);
 
     snprintf(path, MAXPATHLEN, "%s%x/%s", FW_PATCHFILE_LOCATION, rom_version, filename);
 }
@@ -831,6 +839,16 @@ static void write_bdaddr_from_file(int rom_version, int fd)
     fclose(stream);
 }
 
+static void write_bdaddr_from_property(int fd)
+{
+    char bdaddr[PROPERTY_VALUE_MAX];
+
+    /* Get MAC address from property (use a default value if unable to read) */
+    property_get("ro.boot.btaddr", bdaddr, "00:04:F3:FF:FF:BB");
+    ALOGI("bluetooth MAC address = %s\n", bdaddr);
+    write_bdaddr(fd, bdaddr);
+}
+
 #define HCI_EVT_CMD_CMPL_OPCODE                 3
 #define HCI_EVT_CMD_CMPL_STATUS_RET_BYTE        5
 
@@ -1141,7 +1159,7 @@ static int ath_ps_download(int fd)
 
 download_cmplete:
     if (!err)
-        write_bdaddr_from_file(rom_version, fd);
+        write_bdaddr_from_property(fd);
 
     return err;
 }
