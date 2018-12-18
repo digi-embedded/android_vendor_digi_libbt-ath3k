@@ -17,6 +17,9 @@ LOCAL_PATH := $(call my-dir)
 
 # HAL module implemenation, not prelinked and stored in hw/
 include $(CLEAR_VARS)
+ifeq ($(BOARD_HAVE_DA9063_BACKLIGHT),true)
+LOCAL_CFLAGS += -DBOARD_HAVE_DA9063_BACKLIGHT
+endif
 LOCAL_MODULE_RELATIVE_PATH := hw
 LOCAL_SHARED_LIBRARIES := liblog libcutils
 LOCAL_SRC_FILES := fsl_lights.c

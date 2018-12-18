@@ -28,7 +28,11 @@
 
 #define MAX_BRIGHTNESS 255
 #define DEF_BACKLIGHT_DEV "pwm-backlight"
+#ifdef BOARD_HAVE_DA9063_BACKLIGHT
+#define DEF_BACKLIGHT_PATH "/sys/class/leds/"
+#else
 #define DEF_BACKLIGHT_PATH "/sys/class/backlight/"
+#endif
 
 /*****************************************************************************/
 struct lights_module_t {
@@ -54,7 +58,7 @@ struct lights_module_t HAL_MODULE_INFO_SYM = {
     }
 };
 
-static char max_path[256], path[256];
+static char max_path[256], path[256], path_bl2[256];
 // ****************************************************************************
 // module
 // ****************************************************************************
@@ -103,6 +107,16 @@ static int set_light_backlight(struct light_device_t* dev,
     fprintf(file, "%d", brightness);
     fclose(file);
 
+#ifdef BOARD_HAVE_DA9063_BACKLIGHT
+    file = fopen(path_bl2, "w");
+    if (!file) {
+        ALOGE("can not open file %s\n", path_bl2);
+        return result;
+    }
+    fprintf(file, "%d", brightness);
+    fclose(file);
+#endif
+
     result = 0;
     return result;
 }
@@ -140,7 +154,7 @@ static int lights_device_open(const struct hw_module_t* module,
 
         *device = &dev->common;
 
-        property_get("hw.backlight.dev", value, DEF_BACKLIGHT_DEV);
+        property_get("hw.backlight1.dev", value, DEF_BACKLIGHT_DEV);
         strcpy(path, DEF_BACKLIGHT_PATH);
         strcat(path, value);
         strcpy(max_path, path);
@@ -150,6 +164,11 @@ static int lights_device_open(const struct hw_module_t* module,
         ALOGI("max backlight file is %s\n", max_path);
         ALOGI("backlight brightness file is %s\n", path);
 
+#ifdef BOARD_HAVE_DA9063_BACKLIGHT
+        property_get("hw.backlight2.dev", value, DEF_BACKLIGHT_DEV);
+        snprintf(path_bl2, sizeof(path_bl2), "%s%s%s", DEF_BACKLIGHT_PATH, value, "/brightness");
+        ALOGI("backlight brightness file 2 is %s\n", path_bl2);
+#endif
         status = 0;
     }
 
