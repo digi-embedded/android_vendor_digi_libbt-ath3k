@@ -114,6 +114,11 @@ status_t Ov5642Csi::initSensorStaticData()
             vid_frmval.discrete.denominator = 15;
             vid_frmval.discrete.numerator   = 1;
         }
+        else if ((vid_frmsize.discrete.width == 1024) ||
+                (vid_frmsize.discrete.height == 768)) {
+            vid_frmval.discrete.denominator = 15;
+            vid_frmval.discrete.numerator   = 1;
+        }
         else {
             vid_frmval.discrete.denominator = 30;
             vid_frmval.discrete.numerator   = 1;
