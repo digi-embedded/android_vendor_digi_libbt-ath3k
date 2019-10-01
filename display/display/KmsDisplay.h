@@ -88,9 +88,7 @@ public:
     // set display power on/off.
     virtual int setPowerMode(int mode);
     // enable display vsync thread.
-    void enableVsync();
-    // set display vsync/hotplug callback.
-    virtual void setCallback(EventListener* callback);
+    virtual void enableVsync();
     // enable/disable display vsync.
     virtual void setVsyncEnabled(bool enabled);
     // use software vsync.
@@ -143,6 +141,7 @@ private:
     int getDisplayMode(drmModeConnectorPtr pConnector);
 
     void bindCrtc(drmModeAtomicReqPtr pset, uint32_t mode);
+    void bindOutFence(drmModeAtomicReqPtr pset);
     void setMetaData(drmModeAtomicReqPtr pset, MetaData *meta);
     void getGUIResolution(int &width, int &height);
     void getFakeGUIResolution(int &width, int &height);
@@ -159,11 +158,13 @@ protected:
         uint32_t mode_id;
         uint32_t active;
         uint32_t fence_ptr;
+        uint32_t present_fence_ptr;
     } mCrtc;
     uint32_t mCrtcID;
     int mCrtcIndex;
     int mEncoderType;
-    int mReturnFence;
+    int mOutFence;
+    int mPresentFence;
 
     struct {
         uint32_t crtc_id;
@@ -209,7 +210,6 @@ protected:
     };
 
     sp<VSyncThread> mVsyncThread;
-    EventListener* mListener;
 };
 
 }

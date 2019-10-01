@@ -31,6 +31,67 @@
 #include "MemoryManager.h"
 #include "KmsDisplay.h"
 
+// uncomment below to enable frame dump feature
+//#define DEBUG_DUMP_FRAME
+
+#ifdef DEBUG_DUMP_FRAME
+static void dump_frame_to_file(char *pbuf, int size, char *filename)
+{
+    int fd = 0;
+    int len = 0;
+    fd = open(filename, O_CREAT | O_RDWR, 0666);
+    if (fd<0) {
+        ALOGE("Unable to open file [%s]\n",
+             filename);
+    }
+    len = write(fd, pbuf, size);
+    close(fd);
+}
+
+static void dump_frame(char *pbuf, int size)
+{
+    static bool start_dump = false;
+    static int prev_request_frame_count = 0;
+    static int request_frame_count = 0;
+    static int dumpped_count = 0;
+
+    if(!start_dump) {
+        char value[PROPERTY_VALUE_MAX];
+        property_get("hwc.enable.dump_frame", value, "0");
+        request_frame_count = atoi(value);
+        //Previous dump request finished, no more request catched
+        if(prev_request_frame_count == request_frame_count)
+            return;
+
+        prev_request_frame_count = request_frame_count;
+        if (request_frame_count >= 1)
+            start_dump = true;
+        else
+            start_dump = false;
+
+    }
+
+    if((start_dump)&& (request_frame_count >= 1)) {
+        ALOGI("Dump %d frame buffer %p, size %d",
+                dumpped_count, pbuf, size);
+        if (pbuf != 0) {
+            char filename[128];
+            memset(filename, 0, 128);
+            sprintf(filename, "/data/%s-frame-%d.rgba",
+                    "drm-display", dumpped_count);
+            dump_frame_to_file(pbuf, size, filename);
+            dumpped_count ++;
+        }
+        request_frame_count --;
+        if(request_frame_count == 0){
+            start_dump = false;
+        }
+    }
+
+}
+
+#endif
+
 namespace fsl {
 
 KmsDisplay::KmsDisplay()
@@ -53,7 +114,13 @@ KmsDisplay::KmsDisplay()
     mNoResolve = false;
     mAllowModifier = false;
     mMetadataID = 0;
-    mReturnFence = -1;
+    mOutFence = -1;
+    mPresentFence = -1;
+    memset(&mCrtc, 0, sizeof(mCrtc));
+    mCrtcIndex = 0;
+    mEncoderType = 0;
+    memset(&mConnector, 0, sizeof(mConnector));
+    mListener = NULL;
 }
 
 KmsDisplay::~KmsDisplay()
@@ -177,6 +244,7 @@ void KmsDisplay::getKmsProperty()
         {"MODE_ID", &mCrtc.mode_id},
         {"ACTIVE",  &mCrtc.active},
         {"ANDROID_OUT_FENCE_PTR", &mCrtc.fence_ptr},
+        {"OUT_FENCE_PTR", &mCrtc.present_fence_ptr},
     };
 
     struct TableProperty connectorTable[] = {
@@ -210,7 +278,10 @@ void KmsDisplay::setMetaData(drmModeAtomicReqPtr pset, MetaData *meta)
 
     HDRStaticInfo::Type1 &info = meta->mStaticInfo.sType1;
     struct hdr_static_metadata hdr_metadata;
-    if (info.mR.x == 0 && info.mR.y == 0 && info.mG.x == 0 && info.mG.y == 0 &&
+    ColorAspects color = meta->mColor;
+    if (color.mTransfer != ColorAspects::TransferST2084 &&
+        color.mTransfer != ColorAspects::TransferHLG &&
+        info.mR.x == 0 && info.mR.y == 0 && info.mG.x == 0 && info.mG.y == 0 &&
         info.mB.x == 0 && info.mB.y == 0 && info.mW.x == 0 && info.mW.y == 0 &&
         info.mMaxDisplayLuminance == 0 && info.mMaxFrameAverageLightLevel == 0
         && info.mMaxContentLightLevel == 0 && info.mMinDisplayLuminance == 0) {
@@ -253,17 +324,28 @@ void KmsDisplay::bindCrtc(drmModeAtomicReqPtr pset, uint32_t modeID)
                              mConnector.crtc_id, mCrtcID);
     }
 
+    if (mCrtc.present_fence_ptr != 0) {
+        drmModeAtomicAddProperty(pset, mCrtcID,
+                         mCrtc.present_fence_ptr, (uint64_t)&mPresentFence);
+    }
+}
+
+void KmsDisplay::bindOutFence(drmModeAtomicReqPtr pset)
+{
     if (mCrtc.fence_ptr != 0) {
         drmModeAtomicAddProperty(pset, mCrtcID,
-                         mCrtc.fence_ptr, (uint64_t)&mReturnFence);
+                         mCrtc.fence_ptr, (uint64_t)&mOutFence);
     }
 }
 
 int KmsDisplay::getPresentFence(int32_t* outPresentFence)
 {
     if (outPresentFence != NULL) {
-        *outPresentFence = mReturnFence;
-        mReturnFence = -1;
+        if (mPresentFence == -1) {
+            ALOGV("%s invalid present fence:%d", __func__, mPresentFence);
+        }
+        *outPresentFence = mPresentFence;
+        mPresentFence = -1;
     }
     return 0;
 }
@@ -389,7 +471,7 @@ int KmsDisplay::setPowerMode(int mode)
     int err = drmModeConnectorSetProperty(mDrmFd, mConnectorID,
                   mConnector.dpms_id, mPowerMode);
     if (err != 0) {
-        ALOGE("failed to set DPMS mode");
+        ALOGE("failed to set DPMS mode:%d", mPowerMode);
     }
 
     return err;
@@ -403,12 +485,6 @@ void KmsDisplay::enableVsync()
     }
 
     mVsyncThread = new VSyncThread(this);
-}
-
-void KmsDisplay::setCallback(EventListener* callback)
-{
-    Mutex::Autolock _l(mLock);
-    mListener = callback;
 }
 
 void KmsDisplay::setVsyncEnabled(bool enabled)
@@ -467,7 +543,6 @@ bool KmsDisplay::checkOverlay(Layer* layer)
     if (!((memory->usage & USAGE_PADDING_BUFFER) &&
         (memory->fslFormat == FORMAT_NV12)) &&
         !(memory->flags & FLAGS_SECURE) &&
-        memory->fslFormat != FORMAT_NV12_TILED &&
         memory->fslFormat != FORMAT_NV12_G1_TILED &&
         memory->fslFormat != FORMAT_NV12_G2_TILED &&
         memory->fslFormat != FORMAT_NV12_G2_TILED_COMPRESSED &&
@@ -609,6 +684,7 @@ int KmsDisplay::performOverlay()
         return 0;
     }
 
+    bindOutFence(mPset);
     MetaData * meta = MemoryManager::getInstance()->getMetaData(buffer);
     if (meta != NULL && meta->mFlags & FLAGS_META_CHANGED) {
         setMetaData(mPset, meta);
@@ -648,6 +724,8 @@ int KmsDisplay::performOverlay()
 
     return true;
 }
+
+
 
 int KmsDisplay::updateScreen()
 {
@@ -737,10 +815,12 @@ int KmsDisplay::updateScreen()
 
     // to clear screen to black in below case:
     // it is not in client composition and
-    // last overlay state and current are different.
-    if (((mComposeFlag & CLIENT_COMPOSE_MASK) ^
-             CLIENT_COMPOSE_MASK) && ((mComposeFlag >> 1) ^
-             (mComposeFlag & OVERLAY_COMPOSE_MASK))) {
+    // last overlay state and current are different or
+    // all layer is in overlay state.
+
+    if (((mComposeFlag & CLIENT_COMPOSE_MASK) ^ CLIENT_COMPOSE_MASK) &&
+             ( ((mComposeFlag >> 1) ^ (mComposeFlag & OVERLAY_COMPOSE_MASK)) ||
+             ( (mComposeFlag & ONLY_OVERLAY_MASK) ))) {
         if (buffer->base == 0) {
             void *vaddr = NULL;
             int usage = buffer->usage | USAGE_SW_READ_OFTEN
@@ -759,6 +839,18 @@ int KmsDisplay::updateScreen()
         }
     }
 
+#ifdef DEBUG_DUMP_FRAME
+    if(buffer->base == 0) {
+        void *vaddr = NULL;
+        mMemoryManager->lock(buffer, buffer->usage,
+                    0, 0, buffer->width, buffer->height, &vaddr);
+        dump_frame((char *)vaddr, buffer->size);
+        mMemoryManager->unlock(buffer);
+    }
+    else
+        dump_frame((char *)buffer->base, buffer->size);
+#endif
+
     bindCrtc(mPset, modeID);
     mKmsPlanes[0].connectCrtc(mPset, mCrtcID, buffer->fbId);
     mKmsPlanes[0].setSourceSurface(mPset, 0, 0, config.mXres, config.mYres);
@@ -773,11 +865,16 @@ int KmsDisplay::updateScreen()
         setMetaData(mPset, &meta);
     }
 
-    for (uint32_t i=0; i<16; i++) {
+    // DRM driver will hold two frames in async mode.
+    // So user space should wait two vsync interval when it is busy.
+    for (uint32_t i=0; i<32; i++) {
         int ret = drmModeAtomicCommit(drmfd, mPset, flags, NULL);
         if (ret == -EBUSY) {
             ALOGV("commit pset busy and try again");
             usleep(1000);
+            if (i >= 31) {
+                ALOGE("%s atomic commit failed", __func__);
+            }
             continue;
         }
         else if (ret != 0) {
@@ -787,13 +884,11 @@ int KmsDisplay::updateScreen()
     }
 
     if (mOverlay != NULL) {
-        if (mUiUpdate) {
-            mOverlay->releaseFence = (mReturnFence > 0) ? dup(mReturnFence) : -1;
+        mOverlay->releaseFence = mOutFence;
+        if (mOutFence == -1) {
+            ALOGV("%s invalid out fence:%d", __func__, mOutFence);
         }
-        else {
-            mOverlay->releaseFence = mReturnFence;
-            mReturnFence = -1;
-        }
+        mOutFence = -1;
         mOverlay = NULL;
     }
 
@@ -1366,7 +1461,7 @@ int KmsDisplay::composeLayers()
 
     // mLayerVector's size > 0 means 2D composite.
     // only this case needs override mRenderTarget.
-    if (mLayerVector.size() > 0) {
+    if (mLayerVector.size() > 0 || directCompositionLocked()) {
         mTargetIndex = mTargetIndex % MAX_FRAMEBUFFERS;
         mRenderTarget = mTargets[mTargetIndex];
         mTargetIndex++;
@@ -1386,7 +1481,7 @@ void KmsDisplay::handleVsyncEvent(nsecs_t timestamp)
     if (callback == NULL) {
         return;
     }
-
+    triggerRefresh();
     callback->onVSync(DISPLAY_PRIMARY, timestamp);
 }
 
@@ -1533,7 +1628,7 @@ bool KmsDisplay::VSyncThread::threadLoop()
 {
     { // scope for lock
         Mutex::Autolock _l(mLock);
-        while (!mEnabled) {
+        while (!mEnabled && !mCtx->forceVync()) {
             mCondition.wait(mLock);
         }
     }

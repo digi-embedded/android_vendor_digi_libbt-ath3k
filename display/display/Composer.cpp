@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <inttypes.h>
 #include <dlfcn.h>
 #include "Composer.h"
 #include "MemoryManager.h"
@@ -49,21 +50,34 @@ Composer::Composer()
 {
     mTarget = NULL;
     mDimBuffer = NULL;
-    void* handle = NULL;
+    mHelperHandle = NULL;
+    mG2dHandle = NULL;
+
     char path[PATH_MAX] = {0};
     char value[PROPERTY_VALUE_MAX];
+    mTls.tls = 0;
     mTls.has_tls = 0;
     pthread_mutex_init(&mTls.lock, NULL);
 
     property_get("sys.hwc.disable", value, "0");
-    int mDisableHWC = atoi(value);
-
-    if (!mDisableHWC) {
-        getModule(path, GPUHELPER);
-        handle = dlopen(path, RTLD_NOW);
+    mDisableHWC = atoi(value);
+    if (mDisableHWC) {
+        ALOGI("HWC disabled!");
     }
 
-    if (handle == NULL) {
+    property_get("vendor.2d.composition", value, "1");
+    m2DComposition = atoi(value);
+    if (m2DComposition && !mDisableHWC) {
+        ALOGI("g2d 2D composition enabled!");
+    }
+    else {
+        ALOGI("Opengl ES 3D composition enabled!");
+    }
+
+    getModule(path, GPUHELPER);
+    mHelperHandle = dlopen(path, RTLD_NOW);
+
+    if (mHelperHandle == NULL) {
         ALOGV("no %s found", path);
         mGetAlignedSize = NULL;
         mGetFlipOffset = NULL;
@@ -74,23 +88,21 @@ Composer::Composer()
         mAlignTile = NULL;
     }
     else {
-        mGetAlignedSize = (hwc_func3)dlsym(handle, "hwc_getAlignedSize");
-        mGetFlipOffset = (hwc_func2)dlsym(handle, "hwc_getFlipOffset");
-        mGetTiling = (hwc_func2)dlsym(handle, "hwc_getTiling");
-        mAlterFormat = (hwc_func2)dlsym(handle, "hwc_alterFormat");
-        mLockSurface = (hwc_func1)dlsym(handle, "hwc_lockSurface");
-        mUnlockSurface = (hwc_func1)dlsym(handle, "hwc_unlockSurface");
-        mAlignTile = (hwc_func4)dlsym(handle, "hwc_align_tile");
+        mGetAlignedSize = (hwc_func3)dlsym(mHelperHandle, "hwc_getAlignedSize");
+        mGetFlipOffset = (hwc_func2)dlsym(mHelperHandle, "hwc_getFlipOffset");
+        mGetTiling = (hwc_func2)dlsym(mHelperHandle, "hwc_getTiling");
+        mAlterFormat = (hwc_func2)dlsym(mHelperHandle, "hwc_alterFormat");
+        mLockSurface = (hwc_func1)dlsym(mHelperHandle, "hwc_lockSurface");
+        mUnlockSurface = (hwc_func1)dlsym(mHelperHandle, "hwc_unlockSurface");
+        mAlignTile = (hwc_func4)dlsym(mHelperHandle, "hwc_align_tile");
     }
 
-    if (!mDisableHWC) {
-        memset(path, 0, sizeof(path));
-        getModule(path, GPUENGINE);
-        handle = dlopen(path, RTLD_NOW);
-    }
+    memset(path, 0, sizeof(path));
+    getModule(path, GPUENGINE);
+    mG2dHandle = dlopen(path, RTLD_NOW);
 
-    if (handle == NULL) {
-        ALOGI("Use 3D OpenGL ES composition!");
+    if (mG2dHandle == NULL) {
+        ALOGI("can't find %s, 2D is invalid", path);
         mSetClipping = NULL;
         mBlitFunction = NULL;
         mOpenEngine = NULL;
@@ -102,19 +114,19 @@ Composer::Composer()
         mQueryFeature = NULL;
     }
     else {
-        ALOGI("Use 2D HWC composition!");
-        mSetClipping = (hwc_func5)dlsym(handle, "g2d_set_clipping");
-        mBlitFunction = (hwc_func3)dlsym(handle, "g2d_blitEx");
+        ALOGI("load %s library!", path);
+        mSetClipping = (hwc_func5)dlsym(mG2dHandle, "g2d_set_clipping");
+        mBlitFunction = (hwc_func3)dlsym(mG2dHandle, "g2d_blitEx");
         if (mBlitFunction == NULL) {
-            mBlitFunction = (hwc_func3)dlsym(handle, "g2d_blit");
+            mBlitFunction = (hwc_func3)dlsym(mG2dHandle, "g2d_blit");
         }
-        mOpenEngine = (hwc_func1)dlsym(handle, "g2d_open");
-        mCloseEngine = (hwc_func1)dlsym(handle, "g2d_close");
-        mClearFunction = (hwc_func2)dlsym(handle, "g2d_clear");
-        mEnableFunction = (hwc_func2)dlsym(handle, "g2d_enable");
-        mDisableFunction = (hwc_func2)dlsym(handle, "g2d_disable");
-        mFinishEngine = (hwc_func1)dlsym(handle, "g2d_finish");
-        mQueryFeature = (hwc_func3)dlsym(handle, "g2d_query_feature");
+        mOpenEngine = (hwc_func1)dlsym(mG2dHandle, "g2d_open");
+        mCloseEngine = (hwc_func1)dlsym(mG2dHandle, "g2d_close");
+        mClearFunction = (hwc_func2)dlsym(mG2dHandle, "g2d_clear");
+        mEnableFunction = (hwc_func2)dlsym(mG2dHandle, "g2d_enable");
+        mDisableFunction = (hwc_func2)dlsym(mG2dHandle, "g2d_disable");
+        mFinishEngine = (hwc_func1)dlsym(mG2dHandle, "g2d_finish");
+        mQueryFeature = (hwc_func3)dlsym(mG2dHandle, "g2d_query_feature");
     }
 }
 
@@ -123,6 +135,12 @@ Composer::~Composer()
     MemoryManager* pManager = MemoryManager::getInstance();
     if (mDimBuffer != NULL) {
         pManager->releaseMemory(mDimBuffer);
+    }
+    if (mG2dHandle != NULL) {
+        dlclose(mG2dHandle);
+    }
+    if (mHelperHandle != NULL) {
+        dlclose(mHelperHandle);
     }
 }
 
@@ -154,12 +172,21 @@ void Composer::threadDestructor(void *handle)
     }
 
     Composer::getInstance()->closeEngine(handle);
-    free(handle);
 }
 
 bool Composer::isValid()
 {
     return (getHandle() != NULL && mBlitFunction != NULL);
+}
+
+bool Composer::isDisabled()
+{
+    return (mDisableHWC != 0);
+}
+
+bool Composer::is2DComposition()
+{
+    return (m2DComposition != 0);
 }
 
 void Composer::getModule(char *path, const char *name)
@@ -198,7 +225,8 @@ int Composer::checkDimBuffer()
     desc.mFormat = mTarget->format;
     desc.mFslFormat = mTarget->fslFormat;
     desc.mProduceUsage |= USAGE_HW_COMPOSER |
-                          USAGE_HW_2D | USAGE_HW_RENDER;
+                          USAGE_HW_2D | USAGE_HW_RENDER |
+                          USAGE_SW_WRITE_OFTEN | USAGE_SW_READ_OFTEN;
     desc.mFlag = FLAGS_DIMBUFFER;
     desc.checkFormat();
     int ret = pManager->allocMemory(desc, &mDimBuffer);
@@ -345,8 +373,10 @@ int Composer::composeLayer(Layer* layer, bool bypass)
              srect.left, srect.top, srect.right, srect.bottom,
              clip.left, clip.top, clip.right, clip.bottom,
              drect.left, drect.top, drect.right, drect.bottom);
-        ALOGV("target phys:0x%x, layer phys:0x%x",
-                (int)mTarget->phys, (int)layer->handle->phys);
+        if (layer->handle != nullptr) {
+            ALOGV("zorder:0x%x, layer phys:0x%" PRIx64,
+                layer->zorder, layer->handle->phys);
+        }
         ALOGV("transform:0x%x, blend:0x%x, alpha:0x%x",
                 layer->transform, layer->blendMode, layer->planeAlpha);
 
@@ -356,7 +386,7 @@ int Composer::composeLayer(Layer* layer, bool bypass)
         memset(&sSurfaceX, 0, sizeof(sSurfaceX));
         struct g2d_surface& sSurface = sSurfaceX.base;
 
-        if (!layer->isSolidColor()) {
+        if (!layer->isSolidColor() && layer->handle) {
             setG2dSurface(sSurfaceX, layer->handle, srect);
         }
         else if (mDimBuffer) {
@@ -403,7 +433,12 @@ int Composer::setG2dSurface(struct g2d_surfaceEx& surfaceX, Memory *handle, Rect
     surface.stride = alignWidth;
     enum g2d_tiling tile = G2D_LINEAR;
     getTiling(handle, &tile);
-    surfaceX.tiling = tile;
+    if (handle->fslFormat == FORMAT_NV12_TILED) {
+        surfaceX.tiling = G2D_AMPHION_TILED;
+    }
+    else {
+        surfaceX.tiling = tile;
+    }
 
     int offset = 0;
     getFlipOffset(handle, &offset);
@@ -475,6 +510,7 @@ enum g2d_format Composer::convertFormat(int format, Memory *handle)
             halFormat = G2D_NV21;
             break;
         case FORMAT_NV12:
+        case FORMAT_NV12_TILED:
             halFormat = G2D_NV12;
             break;
 

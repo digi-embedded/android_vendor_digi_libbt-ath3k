@@ -49,9 +49,7 @@ public:
     // set display power on/off.
     virtual int setPowerMode(int mode);
     // enable display vsync thread.
-    void enableVsync();
-    // set display vsync/hotplug callback.
-    virtual void setCallback(EventListener* callback);
+    virtual void enableVsync();
     // enable/disable display vsync.
     virtual void setVsyncEnabled(bool enabled);
     // use software vsync.
@@ -65,6 +63,7 @@ public:
     virtual int setActiveConfig(int configId);
     // update composite buffer to screen.
     virtual int updateScreen();
+    virtual int getPresentFence(int32_t* outPresentFence);
 
     // open fb device.
     int openFb();
@@ -102,6 +101,8 @@ protected:
     struct fb_var_screeninfo mOvInfo;
     int mOvPowerMode;
     Layer* mOverlay;
+    int mOutFence;
+    int mPresentFence;
 
 protected:
     void handleVsyncEvent(nsecs_t timestamp);
@@ -130,7 +131,6 @@ protected:
     };
 
     sp<VSyncThread> mVsyncThread;
-    EventListener* mListener;
 };
 
 }

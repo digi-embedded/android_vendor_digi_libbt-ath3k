@@ -165,6 +165,7 @@ status_t Ov5640Imx8Q::initSensorStaticData()
     mActiveArrayHeight = 1944;
     mPixelArrayWidth = 2592;
     mPixelArrayHeight = 1944;
+    mMaxJpegSize = 8 * 1024 * 1024;
 
     ALOGI("ImxdpuCsi, mFocalLength:%f, mPhysicalWidth:%f, mPhysicalHeight %f",
           mFocalLength,
@@ -241,6 +242,11 @@ int32_t Ov5640Imx8Q::Ov5640Stream::onDeviceConfigureLocked()
         ALOGE("%s: VIDIOC_S_FMT Failed: %s", __func__, strerror(errno));
         return ret;
     }
+
+    if(mWidth == 2592 && mHeight == 1944)
+      setOmitFrameCount(2);
+    else
+      setOmitFrameCount(0);
 
     return 0;
 }

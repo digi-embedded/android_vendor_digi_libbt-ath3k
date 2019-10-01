@@ -24,20 +24,16 @@
 static struct audio_card  cs42888_card = {
     .name = "cs42888-audio",
     .driver_name = "cs42888-audio",
-    .supported_out_devices = (AUDIO_DEVICE_OUT_EARPIECE |
+    .bus_name = "bus0_media_out",
+    .supported_out_devices = (
             AUDIO_DEVICE_OUT_SPEAKER |
-            AUDIO_DEVICE_OUT_WIRED_HEADSET |
-            AUDIO_DEVICE_OUT_WIRED_HEADPHONE |
-            AUDIO_DEVICE_OUT_ANLG_DOCK_HEADSET |
-            AUDIO_DEVICE_OUT_ALL_SCO |
-            AUDIO_DEVICE_OUT_DEFAULT ),
+            AUDIO_DEVICE_OUT_BUS),
     .supported_in_devices = (
             AUDIO_DEVICE_IN_COMMUNICATION |
             AUDIO_DEVICE_IN_AMBIENT |
             AUDIO_DEVICE_IN_BUILTIN_MIC |
             AUDIO_DEVICE_IN_WIRED_HEADSET |
             AUDIO_DEVICE_IN_BACK_MIC |
-            AUDIO_DEVICE_IN_ALL_SCO |
             AUDIO_DEVICE_IN_DEFAULT),
     .defaults            = NULL,
     .bt_output           = NULL,

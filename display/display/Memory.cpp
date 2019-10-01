@@ -27,7 +27,7 @@ Memory::Memory(MemoryDesc* desc, int fd, int fd2)
     format(desc->mFormat), stride(desc->mStride),
     usage(desc->mProduceUsage), pid(getpid()),
     fslFormat(desc->mFslFormat), kmsFd(-1),
-    fbHandle(0), fbId(0)
+    fbHandle(0), fbId(0), surface(0)
 {
     version = sizeof(native_handle);
     numInts = sNumInts();
@@ -38,6 +38,13 @@ Memory::Memory(MemoryDesc* desc, int fd, int fd2)
 Memory::~Memory()
 {
     magic = 0;
+    if (fd_meta > 0) {
+        close(fd_meta);
+    }
+
+    if (fd > 0) {
+        close(fd);
+    }
 }
 
 bool Memory::isValid()

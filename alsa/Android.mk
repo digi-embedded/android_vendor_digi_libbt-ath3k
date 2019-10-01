@@ -33,6 +33,14 @@ LOCAL_C_INCLUDES += \
 	hardware/libhardware/include
 LOCAL_SHARED_LIBRARIES := liblog libcutils libtinyalsa libaudioutils libdl libpower
 LOCAL_MODULE_TAGS := optional
+
+# car audio only apply on pi9 auto image
+ifeq ($(shell test $(PLATFORM_SDK_VERSION) -ge 28 && echo Pi9),Pi9)
+ifeq ($(PRODUCT_IMX_CAR),true)
+LOCAL_CFLAGS += -DCAR_AUDIO
+endif
+endif
+
 include $(BUILD_SHARED_LIBRARY)
 
 endif

@@ -85,15 +85,6 @@ static struct route_setting defaults_rt5645[] = {
         .ctl_name = MIXER_RT5645_STEREO_DAC_MIXR_DAC_R1, .intval = 1,
     },
     {
-        .ctl_name = NULL,
-    },
-};
-
-static struct route_setting speaker_output_rt5645[] = {
-    {
-        .ctl_name = MIXER_RT5645_SPK_CHN_SWITCH, .intval = 1,
-    },
-    {
         .ctl_name = MIXER_RT5645_SPKVOL_L_SWITCH, .intval = 1,
     },
     {
@@ -110,6 +101,15 @@ static struct route_setting speaker_output_rt5645[] = {
     },
     {
         .ctl_name = MIXER_RT5645_SPOR_MIX_SPKVOL_R_SWITCH, .intval = 1,
+    },
+    {
+        .ctl_name = NULL,
+    },
+};
+
+static struct route_setting speaker_output_rt5645[] = {
+    {
+        .ctl_name = MIXER_RT5645_SPK_CHN_SWITCH, .intval = 1,
     },
     {
         .ctl_name = MIXER_RT5645_SPK_PLAYBACK_VOL, .intval = 39,
@@ -210,7 +210,7 @@ static struct route_setting mm_built_in_mic_input_rt5645[] = {
  * config*/
 static struct audio_card rt5645_card = {
     .name = "rt5645-audio",
-    .driver_name = "rt5645-audio",
+    .driver_name = "edgetpu-audio",
     .bus_name = "I2S2",
     .supported_out_devices =
         (AUDIO_DEVICE_OUT_EARPIECE | AUDIO_DEVICE_OUT_SPEAKER |

@@ -111,17 +111,21 @@ int IonAllocator::allocMemory(int size, int align, int flags)
     int ret = 0;
     int fd = -1;
     int heapIds = 0;
+    int ion_flags = 0;
 
     // contiguous memory includes cacheable/non-cacheable.
     if (flags & MFLAGS_CONTIGUOUS) {
         heapIds = mCCHeapIds | mCNHeapIds;
+        if (flags & MFLAGS_CACHEABLE)
+            ion_flags = ION_FLAG_CACHED;
+    }
+    else if (flags & MFLAGS_SECURE) {
+        heapIds = mSeHeapIds;
     }
     // cacheable memory includes contiguous/non-contiguous.
     else if (flags & MFLAGS_CACHEABLE) {
         heapIds = mCCHeapIds | mNCHeapIds;
-    }
-    else if (flags & MFLAGS_SECURE) {
-        heapIds = mSeHeapIds;
+        ion_flags = ION_FLAG_CACHED;
     }
     else {
         ALOGE("%s invalid flags:0x%x", __func__, flags);
@@ -137,7 +141,7 @@ int IonAllocator::allocMemory(int size, int align, int flags)
     // But align parameter can't take effect to ensure alignment.
     // And ION driver also can't ensure physical address alignment.
     size = (size + (PAGE_SIZE << 3)) & (~((PAGE_SIZE << 3) - 1));
-    ret = ion_alloc_fd(mIonFd, size, align, heapIds, 0, &fd);
+    ret = ion_alloc_fd(mIonFd, size, align, heapIds, ion_flags, &fd);
     if (ret != 0) {
         ALOGE("ion_alloc failed 0x%08X",ret);
     }
@@ -156,15 +160,18 @@ int IonAllocator::getPhys(int fd, int size, uint64_t& addr)
 
     if (ion_is_legacy(mIonFd)) {
         phyAddr = ion_phys(mIonFd, size, fd);
+        if (phyAddr == 0) {
+            ALOGE("%s ion_phys failed",__func__);
+            return -EINVAL;
+        }
     }
     else {
         struct dma_buf_phys dma_phys;
-        ioctl(fd, DMA_BUF_IOCTL_PHYS, &dma_phys);
+        if (ioctl(fd, DMA_BUF_IOCTL_PHYS, &dma_phys) < 0) {
+            ALOGE("%s DMA_BUF_IOCTL_PHYS failed",__func__);
+            return -EINVAL;
+        }
         phyAddr = dma_phys.phys;
-    }
-    if (phyAddr == 0) {
-        ALOGE("ion_phys failed");
-        return -EINVAL;
     }
 
     addr = phyAddr;
@@ -196,12 +203,18 @@ int IonAllocator::flushCache(int fd)
     }
 
     if (ion_is_legacy(mIonFd)) {
-        ion_sync_fd(mIonFd, fd);
+        if (ion_sync_fd(mIonFd, fd) < 0) {
+            ALOGE("%s ION_IOC_SYNC failed",__func__);
+            return -EINVAL;
+        }
     }
     else {
         struct dma_buf_sync dma_sync;
         dma_sync.flags = DMA_BUF_SYNC_RW | DMA_BUF_SYNC_END;
-        ioctl(fd, DMA_BUF_IOCTL_SYNC, &dma_sync);
+        if (ioctl(fd, DMA_BUF_IOCTL_SYNC, &dma_sync) < 0) {
+            ALOGE("%s DMA_BUF_IOCTL_SYNC failed",__func__);
+            return -EINVAL;
+        }
     }
 
     return 0;

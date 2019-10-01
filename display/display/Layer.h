@@ -58,6 +58,7 @@ enum {
 
 enum {
     SKIP_LAYER          = 0x00000001,
+    BUFFER_SLOT         = 0x40000000,
 };
 
 class Layer
@@ -82,7 +83,11 @@ public:
     Region visibleRegion;
     Rect lastSourceCrop;
     Rect lastDisplayFrame;
+    // fence transfered from surfaceflinger to HWC.
+    // and HWC should wait it before read.
     int acquireFence;
+    // fence transfered from HWC to to surfaceflinger.
+    // and surfaceflinger should wait it before write.
     int releaseFence;
     int index;
     bool isHdrMode;

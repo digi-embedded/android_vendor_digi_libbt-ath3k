@@ -93,7 +93,8 @@ int MemoryDesc::checkFormat()
             }
 
             if (mProduceUsage & USAGE_HW_VIDEO_ENCODER) {
-                mProduceUsage |= USAGE_HW_COMPOSER | USAGE_HW_2D | USAGE_HW_RENDER;
+                mProduceUsage |= USAGE_HW_COMPOSER | USAGE_HW_2D | USAGE_HW_RENDER |
+                                 USAGE_SW_WRITE_OFTEN | USAGE_SW_READ_OFTEN;
             }
             } break;
 
@@ -144,7 +145,7 @@ int MemoryDesc::checkFormat()
             alignedw = ALIGN_PIXEL_32(mWidth);
             alignedh = ALIGN_PIXEL_4(mHeight);
             int c_stride = (alignedw/2+15)/16*16;
-            size = alignedw * alignedh + c_stride * mHeight;
+            size = alignedw * alignedh + c_stride * alignedh;
             } break;
 
         case FORMAT_NV16:

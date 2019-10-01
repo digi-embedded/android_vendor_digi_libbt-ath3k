@@ -24,15 +24,19 @@
 #include "FbDisplay.h"
 #include "KmsDisplay.h"
 #include "DisplayManager.h"
+#include "DisplayHal.h"
 
 namespace fsl {
 
+using nxp::hardware::display::V1_0::implementation::DisplayHal;
 #define HDMI_PLUG_EVENT "hdmi_video"
 #define HDMI_PLUG_CHANGE "change@"
 #define HDMI_SII902_PLUG_EVENT "change@/devices/platform/sii902x.0"
 #define HDMI_EXTCON "extcon"
-#define HDMI_DRM_EVENT "change@/devices/platform/display-subsystem/drm"
+#define HDMI_DEVTYPE_DRM "DEVTYPE=drm_minor"
+#define HDMI_HOTPLUG "HOTPLUG=1"
 
+static sp<DisplayHal> mDisplayHal;
 DisplayManager* DisplayManager::sInstance(0);
 Mutex DisplayManager::sLock(Mutex::PRIVATE);
 
@@ -64,10 +68,11 @@ DisplayManager::DisplayManager()
         mVirtualDisplays[i]->setIndex(i+MAX_PHYSICAL_DISPLAY);
     }
 
+    mListener = NULL;
     mDrmMode = false;
     mDriverReady = true;
     enumKmsDisplays();
-    if (!mDriverReady) {
+    if (mDrmMode && !mDriverReady) {
         mPollFileThread = new PollFileThread(this);
     }
 
@@ -90,6 +95,10 @@ DisplayManager::DisplayManager()
     }
 
     mHotplugThread = new HotplugThread(this);
+    mDisplayHal = new DisplayHal();
+    if (mDisplayHal->registerAsService() != 0) {
+        ALOGE("failed to register IDisplay service");
+    }
 }
 
 DisplayManager::~DisplayManager()
@@ -210,13 +219,14 @@ int DisplayManager::destroyVirtualDisplay(int id)
 void DisplayManager::setCallback(EventListener* callback)
 {
     Display* display = getPhysicalDisplay(DISPLAY_PRIMARY);
-    if (display == NULL)
-        return;
     {
         Mutex::Autolock _l(mLock);
         mListener = callback;
     }
-    display->setCallback(callback);
+
+    if (display != NULL) {
+        display->setCallback(callback);
+    }
 }
 
 EventListener* DisplayManager::getCallback()
@@ -327,22 +337,13 @@ int DisplayManager::enumKmsDisplay(const char *path, int *id, bool *foundPrimary
         if (!*foundPrimary && main) {
             ALOGI("%s set %d as primary display", __func__, (*id));
             *foundPrimary = true;
-            KmsDisplay* tmp = mKmsDisplays[0];
-            mKmsDisplays[0] = mKmsDisplays[*id];
-            mKmsDisplays[*id] = tmp;
-            mKmsDisplays[0]->setIndex(0);
-            mKmsDisplays[0]->setPowerMode(POWER_ON);
-            mKmsDisplays[*id]->setIndex(*id);
-            mKmsDisplays[*id]->setPowerMode(POWER_OFF);
-
-            for (size_t i=0; i<MAX_LAYERS; i++) {
-                Layer* pLayer = mKmsDisplays[*id]->getLayer(i);
-                if (!pLayer->busy) {
-                    continue;
-                }
-                mKmsDisplays[0]->setLayerInfo(i,pLayer);
-            }
-            mKmsDisplays[*id]->invalidLayers();
+            setPrimaryDisplay(*id);
+        }
+        // set actual primary display when it is not connected.
+        else if (!mKmsDisplays[0]->connected() && display->connected()) {
+            ALOGI("%s replace primary display with %d", __func__, (*id));
+            setPrimaryDisplay(*id);
+            (*id)++;
         }
         else {
             (*id)++;
@@ -352,6 +353,27 @@ int DisplayManager::enumKmsDisplay(const char *path, int *id, bool *foundPrimary
     close(drmFd);
 
     return 0;
+}
+
+void DisplayManager::setPrimaryDisplay(int index)
+{
+    KmsDisplay* tmp = mKmsDisplays[0];
+    mKmsDisplays[0] = mKmsDisplays[index];
+    mKmsDisplays[index] = tmp;
+    mKmsDisplays[0]->setIndex(0);
+    mKmsDisplays[0]->setPowerMode(POWER_ON);
+    mKmsDisplays[index]->setIndex(index);
+    mKmsDisplays[index]->setPowerMode(POWER_OFF);
+    mKmsDisplays[0]->setCallback(mListener);
+
+    for (size_t i=0; i<MAX_LAYERS; i++) {
+        Layer* pLayer = mKmsDisplays[index]->getLayer(i);
+        if (!pLayer->busy) {
+            continue;
+        }
+        mKmsDisplays[0]->setLayerInfo(i,pLayer);
+    }
+    mKmsDisplays[index]->invalidLayers();
 }
 
 int DisplayManager::enumFakeKmsDisplay()
@@ -394,7 +416,7 @@ int DisplayManager::enumKmsDisplays()
     if (foundPrimary) {
         mDriverReady = true;
     }
-    else {
+    else if (mDrmMode){
         ALOGI("drm driver may not ready or bootargs is not correct");
         enumFakeKmsDisplay();
         mDriverReady = false;
@@ -573,33 +595,41 @@ int32_t DisplayManager::HotplugThread::readyToRun()
     return 0;
 }
 
+bool DisplayManager::HotplugThread::stringInString(char *uevent_desc, char *sub_string)
+{
+    char *cp;
+    cp = uevent_desc;
+    while(*cp) {
+        if(!strncmp(cp, sub_string, strlen(sub_string)))
+            return true;
+        if (*cp) {
+            cp += strlen(cp) + 1;
+        }
+    }
+    return false;
+}
+
 bool DisplayManager::HotplugThread::threadLoop()
 {
-    char uevent_desc[4096];
-    const char *pSii902 = HDMI_SII902_PLUG_EVENT;
+    char uevent_desc[EVENT_MSG_LEN + 2];
 
-    bool kms = false;
+    bool kms;
     memset(uevent_desc, 0, sizeof(uevent_desc));
     int len = uevent_next_event(uevent_desc, sizeof(uevent_desc) - 2);
-    int type = -1;
-    if (strstr(uevent_desc, HDMI_PLUG_EVENT) != NULL &&
-         strstr(uevent_desc, HDMI_PLUG_CHANGE) != NULL &&
-         strstr(uevent_desc, HDMI_EXTCON) == NULL) {
-        type = DISPLAY_HDMI;
-    }
-    else if (!strncmp(uevent_desc, pSii902, strlen(pSii902))) {
-        type = DISPLAY_HDMI_ON_BOARD;
-    }
-    else if (strstr(uevent_desc, "DEVTYPE=drm_minor") &&
-             strstr(uevent_desc, "HOTPLUG=1")) {
+    if (len <= 0 || len >= EVENT_MSG_LEN)
+        return true;
+    uevent_desc[len] = '\0';
+    uevent_desc[len+1] = '\0';
+
+    if ((stringInString(uevent_desc, HDMI_PLUG_EVENT) &&
+         stringInString(uevent_desc, HDMI_PLUG_CHANGE)  &&
+         stringInString(uevent_desc, HDMI_EXTCON)) || stringInString(uevent_desc, HDMI_SII902_PLUG_EVENT)) {
+        kms = false;
+    } else if (stringInString(uevent_desc, HDMI_DEVTYPE_DRM) &&
+             stringInString(uevent_desc, HDMI_HOTPLUG)) {
         kms = true;
-    }
-    else if (strstr(uevent_desc, HDMI_DRM_EVENT)) {
-        ALOGV("%s kms uevent %s", __func__, uevent_desc);
-        kms = true;
-    }
-    else {
-        ALOGV("%s invalid uevent %s", __func__, uevent_desc);
+    } else {
+        ALOGE("%s invalid uevent %s", __func__, uevent_desc);
         return true;
     }
 
@@ -689,6 +719,9 @@ bool DisplayManager::PollFileThread::threadLoop()
                 if (strstr(inotifyItem->name,"card")) {
                     //detect /dev/dri/card%d has been created
                     mCtx->enumKmsDisplays();
+                    Display* pDisplay = mCtx->getPhysicalDisplay(DISPLAY_PRIMARY);
+                    pDisplay->enableVsync();
+                    pDisplay->setVsyncEnabled(true);
                     EventListener* callback = NULL;
                     callback = mCtx->getCallback();
                     if (callback != NULL) {
