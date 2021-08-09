@@ -104,38 +104,38 @@ class HealthImpl : public Health {
 
 void HealthImpl::UpdateHealthInfo(HealthInfo* health_info) {
   auto* battery_props = &health_info->legacy.legacy;
-  battery_props->maxChargingCurrent = 500000;
-  battery_props->maxChargingVoltage = 5000000;
-  battery_props->batteryStatus = V1_0::BatteryStatus::CHARGING;
-  battery_props->batteryHealth = V1_0::BatteryHealth::GOOD;
-  battery_props->batteryPresent = true;
-  battery_props->batteryLevel = 85;
-  battery_props->batteryVoltage = 3600;
-  battery_props->batteryTemperature = 350;
-  battery_props->batteryCurrent = 400000;
-  battery_props->batteryCycleCount = 32;
-  battery_props->batteryFullCharge = 4000000;
-  battery_props->batteryChargeCounter = 1900000;
+  battery_props->maxChargingCurrent = 0;
+  battery_props->maxChargingVoltage = 0;
+  battery_props->batteryStatus = V1_0::BatteryStatus::UNKNOWN;
+  battery_props->batteryHealth = V1_0::BatteryHealth::UNKNOWN;
+  battery_props->batteryPresent = false;
+  battery_props->batteryLevel = 0;
+  battery_props->batteryVoltage = 0;
+  battery_props->batteryTemperature = 0;
+  battery_props->batteryCurrent = 0;
+  battery_props->batteryCycleCount = 0;
+  battery_props->batteryFullCharge = 0;
+  battery_props->batteryChargeCounter = 0;
   battery_props->batteryTechnology = "Li-ion";
 }
 
 Return<void> HealthImpl::getChargeCounter(getChargeCounter_cb _hidl_cb) {
-  _hidl_cb(Result::SUCCESS, 1900000);
+  _hidl_cb(Result::SUCCESS, 0);
   return Void();
 }
 
 Return<void> HealthImpl::getCurrentNow(getCurrentNow_cb _hidl_cb) {
-  _hidl_cb(Result::SUCCESS, 400000);
+  _hidl_cb(Result::SUCCESS, 0);
   return Void();
 }
 
 Return<void> HealthImpl::getCapacity(getCapacity_cb _hidl_cb) {
-  _hidl_cb(Result::SUCCESS, 85);
+  _hidl_cb(Result::SUCCESS, 100);
   return Void();
 }
 
 Return<void> HealthImpl::getChargeStatus(getChargeStatus_cb _hidl_cb) {
-  _hidl_cb(Result::SUCCESS, BatteryStatus::CHARGING);
+  _hidl_cb(Result::SUCCESS, BatteryStatus::UNKNOWN);
   return Void();
 }
 
